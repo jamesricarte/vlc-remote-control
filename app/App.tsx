@@ -17,6 +17,8 @@ import {
   List,
   ChevronLeft,
   ChevronRight,
+  Trash2,
+  X,
 } from "lucide-react-native";
 import {
   Text,
@@ -24,11 +26,12 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
+  Modal,
 } from "react-native";
 import Slider from "@react-native-community/slider";
 import { LinearGradient } from "expo-linear-gradient";
 import axios from "axios";
-import { Snackbar } from "react-native-paper";
+import { Button, Snackbar } from "react-native-paper";
 import { prettyLog } from "./utils/prettyLog";
 
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -62,6 +65,16 @@ export default function Page() {
     artist: String;
   } | null>(null);
 
+  type PlaylistItem = {
+    id: string;
+    name: string;
+    duration: number;
+    current: boolean;
+  };
+
+  const [showPlaylist, setShowPlaylist] = useState(false);
+  const [playlist, setPlaylist] = useState<PlaylistItem[]>([]);
+
   const isConnectedRef = useRef(false);
 
   const VLC_PASSWORD = "Pass123$";
@@ -87,6 +100,14 @@ export default function Page() {
     return () => clearInterval(interval);
   }, [state]);
 
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchPlaylist();
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, []);
+
   function secondsToTime(totalSeconds: number) {
     const hours = Math.floor(totalSeconds / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
@@ -100,13 +121,14 @@ export default function Page() {
 
   const sendVLCCommand = async (
     command: String,
-    value: String | null = null
+    value: String | null = null,
+    valueType: "val" | "id" = "val"
   ) => {
     if (!command) return;
 
     let queryString = `command=${command}`;
 
-    if (value) queryString = `command=${command}&val=${value}`;
+    if (value) queryString = `command=${command}&${valueType}=${value}`;
 
     const response = await axios.get(
       `${VLC_URL}/requests/status.json?${queryString}`,
@@ -175,12 +197,29 @@ export default function Page() {
       setTotalTime("00:00");
       setProgress(0);
       setVolume(50);
+      setPlaylist([]);
 
       if (isConnectedRef.current) {
         setShowSnackbar(true);
         setError("Connection Error: Can't connect to VLC");
         isConnectedRef.current = false;
       }
+    }
+  };
+
+  const fetchPlaylist = async () => {
+    try {
+      const response = await axios.get(`${VLC_URL}/requests/playlist.json`, {
+        headers: { Authorization: auth },
+      });
+
+      const responseData = response.data;
+
+      if (responseData) {
+        setPlaylist(responseData.children[0].children);
+      }
+    } catch (error: any) {
+      console.log("Error connecting to VLC interface:", error);
     }
   };
 
@@ -236,13 +275,15 @@ export default function Page() {
   };
 
   const toggleShuffle = async () => {
-    await sendVLCCommand("pl_random");
-    setIsShuffle(!isShuffle);
+    const responseData = await sendVLCCommand("pl_random");
+
+    if (responseData) setIsShuffle(responseData.random);
   };
 
   const toggleRepeat = async () => {
-    await sendVLCCommand("pl_repeat");
-    setIsRepeat(!isRepeat);
+    const responseData = await sendVLCCommand("pl_repeat");
+
+    if (responseData) setIsRepeat(responseData.repeat);
   };
 
   const handleSeek = async (direction: "previous" | "next") => {
@@ -273,6 +314,31 @@ export default function Page() {
       setCurrentTime(secondsToTime(responseData.time));
       setTotalTime(secondsToTime(responseData.length));
     }
+  };
+
+  const handlePlaylistToggle = () => {
+    setShowPlaylist(!showPlaylist);
+  };
+
+  const handlePlaylistItemSelect = async (id: string) => {
+    await sendVLCCommand("pl_play", id.toString(), "id");
+    fetchPlaylist();
+  };
+
+  const handlePlaylistItemRemove = async (id: string) => {
+    await sendVLCCommand("pl_delete", id.toString(), "id");
+    fetchPlaylist();
+  };
+
+  const handleClearPlaylist = async () => {
+    await sendVLCCommand("pl_empty");
+    fetchPlaylist();
+  };
+
+  const formatDuration = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
   return (
@@ -512,14 +578,10 @@ export default function Page() {
 
           {/* Bottom Actions */}
           <View className="flex-row gap-3">
-            <TouchableOpacity className="flex-row items-center justify-center flex-1 gap-2 py-4 bg-white/10 rounded-2xl">
-              <FolderOpen width={24} height={24} color="white" />
-              <Text className="text-base font-semibold text-white">
-                Load File
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity className="flex-row items-center justify-center flex-1 gap-2 py-4 bg-white/10 rounded-2xl">
+            <TouchableOpacity
+              onPress={handlePlaylistToggle}
+              className="flex-row items-center justify-center flex-1 gap-2 py-4 bg-white/10 rounded-2xl"
+            >
               <List width={24} height={24} color="white" />
               <Text className="text-base font-semibold text-white">
                 Playlist
@@ -527,6 +589,108 @@ export default function Page() {
             </TouchableOpacity>
           </View>
         </ScrollView>
+
+        {/* Playlist Modal */}
+        {showPlaylist && (
+          <Modal
+            visible={showPlaylist}
+            transparent
+            animationType="slide"
+            onRequestClose={handlePlaylistToggle}
+          >
+            <View className="items-center justify-end flex-1 p-6 bg-black/60">
+              <View
+                className={`bg-white/10 rounded-3xl p-6 w-full max-w-md max-h-[80%] ${
+                  playlist.length > 0 ? "min-h-[50%]" : ""
+                }`}
+              >
+                {/* Header */}
+                <View className="flex-row items-center justify-between mb-4">
+                  <Text className="text-lg font-semibold text-white">
+                    Playlist
+                  </Text>
+
+                  <TouchableOpacity
+                    onPress={handlePlaylistToggle}
+                    className="items-center justify-center w-8 h-8 rounded-full bg-white/10"
+                  >
+                    <X size={20} color="white" />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Empty state */}
+                {playlist.length === 0 ? (
+                  <View className="items-center py-8">
+                    <Text className="text-white/60">Playlist is empty</Text>
+                  </View>
+                ) : (
+                  <>
+                    {/* Playlist list */}
+                    <ScrollView className="flex-1 mb-4">
+                      <View className="gap-2">
+                        {playlist.map((item) => (
+                          <TouchableOpacity
+                            key={item.id}
+                            onPress={() => handlePlaylistItemSelect(item.id)}
+                            className={`flex-row items-center justify-between px-4 py-3 rounded-2xl ${
+                              item.current
+                                ? "bg-orange-500/20 border border-orange-500/30"
+                                : "bg-white/10"
+                            }`}
+                          >
+                            {/* Left */}
+                            <View className="flex-row items-center flex-1 min-w-0 gap-3">
+                              <TouchableOpacity
+                                onPress={() =>
+                                  handlePlaylistItemSelect(item.id)
+                                }
+                                className="items-center justify-center w-8 h-8 rounded-full bg-white/10"
+                              >
+                                <Play
+                                  size={16}
+                                  color={item.current ? "#f97316" : "white"}
+                                />
+                              </TouchableOpacity>
+
+                              <View className="flex-1 min-w-0">
+                                <Text
+                                  numberOfLines={1}
+                                  className="text-sm text-white"
+                                >
+                                  {item.name}
+                                </Text>
+                                <Text className="text-xs text-white/50">
+                                  {formatDuration(item.duration)}
+                                </Text>
+                              </View>
+                            </View>
+
+                            {/* Remove */}
+                            <TouchableOpacity
+                              onPress={() => handlePlaylistItemRemove(item.id)}
+                              className="items-center justify-center w-8 h-8 ml-2 rounded-full bg-white/10"
+                            >
+                              <Trash2 size={16} color="white" />
+                            </TouchableOpacity>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </ScrollView>
+
+                    {/* Clear playlist */}
+                    <TouchableOpacity
+                      onPress={handleClearPlaylist}
+                      className="flex-row items-center justify-center w-full gap-2 py-3 border bg-red-500/20 rounded-2xl border-red-500/30"
+                    >
+                      <Trash2 size={20} color="white" />
+                      <Text className="text-white">Clear Playlist</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+              </View>
+            </View>
+          </Modal>
+        )}
 
         <Snackbar
           visible={showSnackbar && error !== ""}
