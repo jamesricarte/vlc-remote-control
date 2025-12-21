@@ -28,6 +28,7 @@ import {
   RefreshControl,
   Modal,
 } from "react-native";
+import { BlurView } from "expo-blur";
 import Slider from "@react-native-community/slider";
 import { LinearGradient } from "expo-linear-gradient";
 import axios from "axios";
@@ -75,6 +76,12 @@ export default function Page() {
   const [showPlaylist, setShowPlaylist] = useState(false);
   const [playlist, setPlaylist] = useState<PlaylistItem[]>([]);
 
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
+  const [deleteAction, setDeleteAction] = useState<{
+    type: "item" | "clear";
+    id?: string;
+  }>({ type: "clear" });
+
   const isConnectedRef = useRef(false);
 
   const VLC_PASSWORD = "Pass123$";
@@ -84,13 +91,14 @@ export default function Page() {
     const getDelayFromState = (state: String) => {
       switch (state) {
         case "playing":
-          return 100;
+          return 200;
         case "paused":
           return 500;
         case "stopped":
           return 2000;
       }
     };
+
     const delay = getDelayFromState(state);
 
     const interval = setInterval(() => {
@@ -258,7 +266,6 @@ export default function Page() {
       `${(newVolume / 100) * 512}`
     );
 
-    prettyLog(responseData);
     setVolume(newVolume);
     if (newVolume > 0) setIsMuted(false);
   };
@@ -591,102 +598,173 @@ export default function Page() {
         </ScrollView>
 
         {/* Playlist Modal */}
-        {showPlaylist && (
+        <Modal
+          visible={showPlaylist}
+          transparent
+          animationType="slide"
+          onRequestClose={handlePlaylistToggle}
+        >
+          <View className="items-center justify-end flex-1 p-6 bg-black/60">
+            <View
+              className={`bg-white/10 rounded-3xl p-6 w-full max-w-md max-h-[80%] ${
+                playlist.length > 0 ? "min-h-[50%]" : ""
+              }`}
+            >
+              {/* Header */}
+              <View className="flex-row items-center justify-between mb-4">
+                <Text className="text-lg font-semibold text-white">
+                  Playlist
+                </Text>
+
+                <TouchableOpacity
+                  onPress={handlePlaylistToggle}
+                  className="items-center justify-center w-8 h-8 rounded-full bg-white/10"
+                >
+                  <X size={20} color="white" />
+                </TouchableOpacity>
+              </View>
+
+              {/* Empty state */}
+              {playlist.length === 0 ? (
+                <View className="items-center py-8">
+                  <Text className="text-white/60">Playlist is empty</Text>
+                </View>
+              ) : (
+                <>
+                  {/* Playlist list */}
+                  <ScrollView className="flex-1 mb-4">
+                    <View className="gap-2">
+                      {playlist.map((item) => (
+                        <TouchableOpacity
+                          key={item.id}
+                          onPress={() => handlePlaylistItemSelect(item.id)}
+                          className={`flex-row items-center justify-between px-4 py-3 rounded-2xl ${
+                            item.current
+                              ? "bg-orange-500/20 border border-orange-500/30"
+                              : "bg-white/10"
+                          }`}
+                        >
+                          {/* Left */}
+                          <View className="flex-row items-center flex-1 min-w-0 gap-3">
+                            <TouchableOpacity
+                              onPress={() => handlePlaylistItemSelect(item.id)}
+                              className="items-center justify-center w-8 h-8 rounded-full bg-white/10"
+                            >
+                              <Play
+                                size={16}
+                                color={item.current ? "#f97316" : "white"}
+                              />
+                            </TouchableOpacity>
+
+                            <View className="flex-1 min-w-0">
+                              <Text
+                                numberOfLines={1}
+                                className="text-sm text-white"
+                              >
+                                {item.name}
+                              </Text>
+                              <Text className="text-xs text-white/50">
+                                {formatDuration(item.duration)}
+                              </Text>
+                            </View>
+                          </View>
+
+                          {/* Remove */}
+                          <TouchableOpacity
+                            onPress={(e) => {
+                              e.stopPropagation();
+                              setDeleteAction({
+                                type: "item",
+                                id: item.id,
+                              });
+                              setShowDeleteConfirmation(true);
+                            }}
+                            className="items-center justify-center w-8 h-8 ml-2 rounded-full bg-white/10"
+                          >
+                            <Trash2 size={16} color="white" />
+                          </TouchableOpacity>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </ScrollView>
+
+                  {/* Clear playlist */}
+                  <TouchableOpacity
+                    onPress={() => {
+                      setDeleteAction({ type: "clear" });
+                      setShowDeleteConfirmation(true);
+                    }}
+                    className="flex-row items-center justify-center w-full gap-2 py-3 border bg-red-500/20 rounded-2xl border-red-500/30"
+                  >
+                    <Trash2 size={20} color="white" />
+                    <Text className="text-white">Clear Playlist</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+          </View>
+        </Modal>
+
+        {/* Delete Confirmation Modal */}
+        {showDeleteConfirmation && (
           <Modal
-            visible={showPlaylist}
+            visible={showDeleteConfirmation}
             transparent
-            animationType="slide"
-            onRequestClose={handlePlaylistToggle}
+            animationType="fade"
+            onRequestClose={() => setShowDeleteConfirmation(false)}
           >
-            <View className="items-center justify-end flex-1 p-6 bg-black/60">
-              <View
-                className={`bg-white/10 rounded-3xl p-6 w-full max-w-md max-h-[80%] ${
-                  playlist.length > 0 ? "min-h-[50%]" : ""
-                }`}
-              >
+            <View className="items-center justify-center flex-1 p-6 bg-black/70">
+              <View className="bg-orange-100/10 rounded-3xl p-6 w-full max-w-md max-h-[80%]">
                 {/* Header */}
                 <View className="flex-row items-center justify-between mb-4">
                   <Text className="text-lg font-semibold text-white">
-                    Playlist
+                    Confirm Delete
                   </Text>
 
                   <TouchableOpacity
-                    onPress={handlePlaylistToggle}
+                    onPress={() => setShowDeleteConfirmation(false)}
                     className="items-center justify-center w-8 h-8 rounded-full bg-white/10"
                   >
                     <X size={20} color="white" />
                   </TouchableOpacity>
                 </View>
 
-                {/* Empty state */}
-                {playlist.length === 0 ? (
-                  <View className="items-center py-8">
-                    <Text className="text-white/60">Playlist is empty</Text>
-                  </View>
-                ) : (
-                  <>
-                    {/* Playlist list */}
-                    <ScrollView className="flex-1 mb-4">
-                      <View className="gap-2">
-                        {playlist.map((item) => (
-                          <TouchableOpacity
-                            key={item.id}
-                            onPress={() => handlePlaylistItemSelect(item.id)}
-                            className={`flex-row items-center justify-between px-4 py-3 rounded-2xl ${
-                              item.current
-                                ? "bg-orange-500/20 border border-orange-500/30"
-                                : "bg-white/10"
-                            }`}
-                          >
-                            {/* Left */}
-                            <View className="flex-row items-center flex-1 min-w-0 gap-3">
-                              <TouchableOpacity
-                                onPress={() =>
-                                  handlePlaylistItemSelect(item.id)
-                                }
-                                className="items-center justify-center w-8 h-8 rounded-full bg-white/10"
-                              >
-                                <Play
-                                  size={16}
-                                  color={item.current ? "#f97316" : "white"}
-                                />
-                              </TouchableOpacity>
+                {/* Message */}
+                <View className="items-center py-8">
+                  <Text className="text-center text-white/60">
+                    {deleteAction.type === "item"
+                      ? "Are you sure you want to remove this item from the playlist?"
+                      : "Are you sure you want to clear the playlist?"}
+                  </Text>
+                </View>
 
-                              <View className="flex-1 min-w-0">
-                                <Text
-                                  numberOfLines={1}
-                                  className="text-sm text-white"
-                                >
-                                  {item.name}
-                                </Text>
-                                <Text className="text-xs text-white/50">
-                                  {formatDuration(item.duration)}
-                                </Text>
-                              </View>
-                            </View>
+                {/* Actions */}
+                <View className="flex-row items-center justify-center gap-4">
+                  <TouchableOpacity
+                    onPress={() => setShowDeleteConfirmation(false)}
+                    className="flex-row items-center justify-center gap-3 p-4 bg-white/10 rounded-2xl"
+                  >
+                    <X size={20} color="white" />
+                    <Text className="text-white">Cancel</Text>
+                  </TouchableOpacity>
 
-                            {/* Remove */}
-                            <TouchableOpacity
-                              onPress={() => handlePlaylistItemRemove(item.id)}
-                              className="items-center justify-center w-8 h-8 ml-2 rounded-full bg-white/10"
-                            >
-                              <Trash2 size={16} color="white" />
-                            </TouchableOpacity>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-                    </ScrollView>
-
-                    {/* Clear playlist */}
-                    <TouchableOpacity
-                      onPress={handleClearPlaylist}
-                      className="flex-row items-center justify-center w-full gap-2 py-3 border bg-red-500/20 rounded-2xl border-red-500/30"
-                    >
-                      <Trash2 size={20} color="white" />
-                      <Text className="text-white">Clear Playlist</Text>
-                    </TouchableOpacity>
-                  </>
-                )}
+                  <TouchableOpacity
+                    onPress={() => {
+                      if (deleteAction.type === "item" && deleteAction.id) {
+                        handlePlaylistItemRemove(deleteAction.id);
+                      } else if (deleteAction.type === "clear") {
+                        handleClearPlaylist();
+                      }
+                      setShowDeleteConfirmation(false);
+                    }}
+                    className="flex-row items-center justify-center gap-2 p-4 border bg-red-500/20 rounded-2xl border-red-500/30"
+                  >
+                    <Trash2 size={20} color="white" />
+                    <Text className="text-white">
+                      {deleteAction.type === "item" ? "Delete" : "Clear"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             </View>
           </Modal>
