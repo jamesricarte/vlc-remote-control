@@ -28,11 +28,10 @@ import {
   RefreshControl,
   Modal,
 } from "react-native";
-import { BlurView } from "expo-blur";
 import Slider from "@react-native-community/slider";
 import { LinearGradient } from "expo-linear-gradient";
 import axios from "axios";
-import { Button, Snackbar } from "react-native-paper";
+import { Snackbar } from "react-native-paper";
 import { prettyLog } from "./utils/prettyLog";
 
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -45,7 +44,7 @@ global.prettyLog = prettyLog;
 
 export default function Page() {
   const [isPlaying, setIsPlaying] = useState(false);
-  const [volume, setVolume] = useState(50);
+  const [volume, setVolume] = useState(100);
   const [isMuted, setIsMuted] = useState(false);
   const [isShuffle, setIsShuffle] = useState(false);
   const [isRepeat, setIsRepeat] = useState(false);
@@ -83,9 +82,13 @@ export default function Page() {
   }>({ type: "clear" });
 
   const isConnectedRef = useRef(false);
+  const isChangingVolumeRef = useRef(false);
+  const isChangingProgressBarRef = useRef(false);
 
   const VLC_PASSWORD = "Pass123$";
   const auth = "Basic " + btoa(`:${VLC_PASSWORD}`);
+
+  const maxVolumePercent = 200;
 
   useEffect(() => {
     const getDelayFromState = (state: String) => {
@@ -121,10 +124,16 @@ export default function Page() {
     const minutes = Math.floor((totalSeconds % 3600) / 60);
     const seconds = totalSeconds % 60;
 
-    return [
+    const timeParts = [
       minutes.toString().padStart(2, "0"),
       seconds.toString().padStart(2, "0"),
-    ].join(":");
+    ];
+
+    if (hours >= 1) {
+      timeParts.unshift(hours.toString().padStart(2, "0"));
+    }
+
+    return timeParts.join(":");
   }
 
   const sendVLCCommand = async (
@@ -163,7 +172,7 @@ export default function Page() {
       const responseData = response.data;
 
       if (responseData) {
-        // prettyLog("Response:", responseData);
+        // prettyLog("Response Data:", responseData);
         // console.log("CONNECTED!");
         setIsConnected(true);
         setState(responseData.state);
@@ -183,9 +192,16 @@ export default function Page() {
         setProgress(responseData.position * 100);
         setTime(responseData.time);
         setLength(responseData.length);
-        setCurrentTime(secondsToTime(responseData.time));
         setTotalTime(secondsToTime(responseData.length));
-        setVolume(Math.round((responseData.volume / 512) * 100));
+
+        if (!isChangingProgressBarRef.current)
+          setCurrentTime(secondsToTime(responseData.time));
+
+        if (!isChangingVolumeRef.current)
+          setVolume(Math.round((responseData.volume / 512) * maxVolumePercent));
+
+        if (responseData.volume > 0) setIsMuted(false);
+        else setIsMuted(true);
 
         if (!isConnectedRef.current) {
           setError("Connected to VLC");
@@ -250,32 +266,45 @@ export default function Page() {
   };
 
   const handleProgressChange = async (newProgress: number) => {
+    const absoluteTimeInSeconds = (newProgress / 100) * length;
+
     try {
-      const responseData = await sendVLCCommand("seek", `${newProgress}%25`);
+      const responseData = await sendVLCCommand(
+        "seek",
+        `${Math.trunc(absoluteTimeInSeconds)}`
+      );
 
       if (responseData) setProgress(responseData?.position * 100);
     } catch (error: any) {
       console.error("ERROR:");
       prettyLog(error?.response?.data || error?.response || error);
+    } finally {
+      isChangingProgressBarRef.current = false;
     }
   };
 
   const handleVolumeChange = async (newVolume: number) => {
-    const responseData = await sendVLCCommand(
-      "volume",
-      `${(newVolume / 100) * 512}`
-    );
+    await sendVLCCommand("volume", `${(newVolume / maxVolumePercent) * 512}`);
 
     setVolume(newVolume);
     if (newVolume > 0) setIsMuted(false);
+
+    isChangingVolumeRef.current = false;
   };
 
   const toggleMute = async () => {
     const volumeValue = isMuted ? "256" : "0";
-    const responseData = await sendVLCCommand("volume", volumeValue);
+    await sendVLCCommand("volume", `${volumeValue}`);
+
+    const response = await axios.get(`${VLC_URL}/requests/status.json`, {
+      headers: { Authorization: auth },
+    });
+
+    const responseData = response.data;
 
     if (responseData) {
-      setVolume(Math.round((responseData.volume / 512) * 100));
+      setVolume(Math.round((responseData.volume / 512) * maxVolumePercent));
+
       if (responseData.volume > 0) setIsMuted(false);
       else setIsMuted(true);
     }
@@ -439,6 +468,12 @@ export default function Page() {
                 minimumValue={0}
                 maximumValue={100}
                 value={progress}
+                onValueChange={(newValue) => {
+                  isChangingProgressBarRef.current = true;
+                  setCurrentTime(
+                    secondsToTime(Math.trunc((newValue / 100) * length))
+                  );
+                }}
                 onSlidingComplete={handleProgressChange}
                 minimumTrackTintColor="rgba(255,255,255,0.8)"
                 maximumTrackTintColor="rgba(255,255,255,0.2)"
@@ -546,8 +581,12 @@ export default function Page() {
               <Slider
                 style={{ flex: 1, height: 6 }}
                 minimumValue={0}
-                maximumValue={100}
+                maximumValue={maxVolumePercent}
                 value={isMuted ? 0 : volume}
+                onValueChange={(newValue) => {
+                  isChangingVolumeRef.current = true;
+                  setVolume(newValue);
+                }}
                 onSlidingComplete={handleVolumeChange}
                 minimumTrackTintColor="rgba(255,255,255,0.8)"
                 maximumTrackTintColor="rgba(255,255,255,0.2)"
